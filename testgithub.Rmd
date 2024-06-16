@@ -1,0 +1,232 @@
+---
+title: "Practice Survival PYQ"
+author: "Ahmad Firdaus Mohamed"
+date: "2024-01-22"
+output: word_document
+---
+
+# Survival Analysis
+
+# Load Library
+
+```{r}
+library(survival)
+library(gtsummary)
+library(survminer)
+library(tidyverse)
+library(broom)
+library(lubridate)
+library(haven)
+library(dplyr)
+library(corrplot)
+library(mfp)
+```
+
+## Read Data
+
+```{r}
+stroke <- read_dta ("stroke_outcome.dta")
+```
+
+```{r}
+summary(stroke)
+```
+
+```{r}
+stroke <- stroke %>%
+  mutate_if(is.labelled,~as_factor(.))
+```
+
+```{r}
+summary(stroke)
+```
+
+```{r}
+stroke <- stroke %>%
+  mutate(dur=stroke$doa %--% stroke$dod) %>%
+           mutate(dur=as.duration(dur)) %>%
+  mutate(dur_days = dur/ddays (1))
+
+```
+
+```{r}
+stroke <- stroke %>% 
+  mutate(category=cut(stroke$sbp, c (0,140,160,300), label = c('normal', 'hpt1','hpt2')))
+  
+```
+
+```{r}
+KM1 <- survfit(Surv(time = dur_days, event == 'dead')~1, type= "kaplan-meier", data = stroke)
+summary(KM1)
+```
+
+```{r}
+plotKM <- ggsurvplot(KM1, conf.int = TRUE, surv.median.line = "hv", xlab="days") ##surv.median.line = "hv", xlab("Days"), ylab= "survival probability", break.time.by = 20, risk.table =T)
+plotKM
+```
+
+```{r}
+quantile (KM1, probs = c (0.25,0.50, 0.75))
+```
+
+```{r}
+summary(KM1, times = c(10, 20, 30))
+```
+
+```{r}
+KMlogrank <- survdiff(Surv(time = dur_days, event == "dead")~sex, data = stroke, rho = 0)
+KMlogrank
+```
+
+```{r}
+KMpeto <- survdiff(Surv(time = dur_days, event == "dead")~sex, data = stroke, rho = 1)
+KMpeto
+```
+
+p\>0.05, hence there is no difference between survival probability of male and female
+
+Efron Method
+
+```{r}
+cox1 <- coxph(Surv(time = dur_days, event == "dead")~sex + sbp + sex:sbp, data = stroke)
+cox1
+```
+
+Breslow Method
+
+```{r}
+cox2 <- coxph(Surv(time = dur_days, event == "dead")~sex + sbp + dm2, data = stroke, method = 'breslow')
+cox2
+```
+
+```{r}
+cox3 <- coxph(Surv(time = dur_days, event == "dead")~sex + sbp + dm2, data = stroke, method = 'breslow')
+cox3
+```
+
+```{r}
+tidy(cox3, conf.int = TRUE)
+```
+
+Interaction
+
+```{r}
+cox4 <- coxph(Surv(time = dur_days, event == "dead")~sex + sbp + dm2 + sex:dm2, data = stroke, method = 'breslow')
+cox4
+```
+
+```{r}
+anova (cox2, cox4, test = 'Chisq')
+```
+
+Checking assumption for CoxPH
+
+Multicollinearity (there is no need check due to only 1 covariate, sbp)
+
+```{r}
+
+```
+
+Proportional hazard
+
+```{r}
+cph <- cox.zph(cox2, transform = 'km', global = TRUE) ## can use transform=identity / log/km
+cph
+plot(cph)
+```
+
+All p-value are \> 0.05 and global is \>0.05, hence the proportional hazard is met.
+
+Plots show some violation (appear outside line) but not severe.
+
+Linearity
+
+```{r}
+mfp.sbp <- mfp(Surv(time = dur_days, event == 'dead' )~fp (sbp, df=4) + sex + dm2 + dm2, family = cox, data = stroke, verbose = TRUE)
+```
+
+```{r}
+mfp.sbp$pvalue
+```
+
+p-value of p.lin is \>0.05 (0.17), hence linearity is assumed
+
+Residuals
+
+```{r}
+score.cox <- resid(cox2, type = "score")
+plot(score.cox)
+```
+
+```{r}
+marti.cox <- resid(cox2, type = "martingale")
+plot(marti.cox)
+```
+
+```{r}
+sch.cox <- resid(cox2, type = "schoenfeld")
+plot(sch.cox)
+```
+
+```{r}
+scaled.cox <- resid(cox2, type = "scaledsch")
+plot(scaled.cox)
+```
+
+Checking for every covariate (we should do for all covariate, kalau x mention dia akan ambik yang paling atas)
+
+```{r}
+marti.sex <- resid(cox2, type = "martingale")
+plot(stroke$sex, marti.cox)
+```
+
+\
+Getting residual using augment
+
+```{r}
+augment(cox2, data = stroke)
+```
+
+```{r}
+new.data <- expand.grid(sbp = c(110, 150, 170), sex= c('male','female'), dm2 = c ('yes','no'))
+new.data
+```
+
+```{r}
+augment(cox2,new_data=new.data)
+```
+
+So, to predict using new data
+
+```{r}
+summary(cox2)
+```
+
+```{r}
+tidy(cox2)
+```
+
+Equation = 0.1396\*sex + 0.0053\*sbp + 0.9525\*dm
+
+```{r}
+(0.1396*0) + (0.0053*108) + (0.9525*0)
+```
+
+Log Hazard
+
+```{r}
+predict(cox2, newdata = new.data, type = 'lp')
+```
+
+Hazard Risk
+
+```{r}
+predict(cox2, newdata = new.data, type = 'risk')
+```
+
+Create Table
+
+```{r}
+Tbl1 <- tbl_regression(cox2, pvalue_fun = ~style_pvalue(.x, digits = 3))
+Tbl1
+```
